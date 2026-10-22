@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Livpg HTML block checks</title>
+<style>
+  body{font:15px system-ui;margin:24px;background:#f5f5f5;color:#212121}textarea{box-sizing:border-box;width:100%;height:240px;font:13px monospace}button{padding:10px 16px;margin:12px 0;border:0;border-radius:12px;background:#212121;color:white}#cases{display:flex;flex-wrap:wrap;gap:20px}.case{overflow:auto;max-width:100%;padding:12px;background:white;border-radius:12px}iframe{display:block;border:0;background:#fff}pre{white-space:pre-wrap}.status{font-size:12px;max-width:400px}
+</style>
+<h1>HTML widget output checks</h1>
+<p>Paste a model's generated block. This harness checks structure, script errors and overflow at five sizes; review appearance and exercise every control manually. It does not assess which AI prompt is best.</p>
+<textarea id="code" aria-label="Generated HTML block" placeholder="Paste the generated meta tags and root div here"></textarea>
+<button id="run">Test output</button>
+<pre id="summary"></pre><div id="cases"></div>
+<script src="../js/limits.js"></script>
+<script>
+/** Evaluates supplied output in isolated frames; generated scripts never run in this page. */
+document.querySelector('#run').onclick = () => {
+  const code = unwrapHTMLCode(document.querySelector('#code').value);
+  const parsed = new DOMParser().parseFromString(code, 'text/html');
+  const read = (name, fallback) => Math.max(40, Math.min(2000, +parsed.querySelector(`meta[name="livpg:${name}"]`)?.content || fallback));
+  const width=read('width',400),height=read('height',300),minW=read('min-width',220),minH=read('min-height',160),maxW=read('max-width',800),maxH=read('max-height',600);
+  const messages=[];
+  const roots=[...parsed.body.children].filter(node=>!['META','STYLE','SCRIPT'].includes(node.tagName));
+  messages.push(roots.length===1 && roots[0].tagName==='DIV' ? 'PASS: one visible root div' : 'FAIL: output must contain one root div');
+  for(const name of ['width','height','min-width','min-height','max-width','max-height']) if(!parsed.querySelector(`meta[name="livpg:${name}"]`)) messages.push('FAIL: missing size hint '+name);
+  if(parsed.querySelector('script[src],link[href],img[src^="http"],iframe,video[src^="http"]')) messages.push('REVIEW: external resource or nested iframe');
+  document.querySelector('#summary').textContent=messages.join('\n');
+  const container=document.querySelector('#cases');container.replaceChildren();
+  for(const [label,w,h] of [['Initial',width,height],['Minimum',minW,minH],['Maximum',maxW,maxH],['Narrow/tall',minW,maxH],['Wide/short',maxW,minH]]) {
+    const card=document.createElement('section');card.className='case';
+    const heading=document.createElement('h3');heading.textContent=`${label}: ${w} × ${h}`;
+    const status=document.createElement('p');status.className='status';status.textContent='Loading…';
+    const frame=document.createElement('iframe');frame.setAttribute('sandbox','allow-scripts');frame.title=heading.textContent;frame.style.width=w+'px';frame.style.height=h+'px';
+    const id=crypto.randomUUID();
+    const before='<script>window.__widgetErrors=[];addEventListener("error",e=>__widgetErrors.push(e.message));addEventListener("unhandledrejection",()=>__widgetErrors.push("Unhandled promise rejection"));<\/script>';
+    const after='<script>setTimeout(()=>{const root=[...document.body.children].find(e=>e.tagName==="DIV");parent.postMessage({id:'+JSON.stringify(id)+',errors:window.__widgetErrors,overflow:document.documentElement.scrollWidth>innerWidth+1||document.documentElement.scrollHeight>innerHeight+1||(root&&(root.scrollWidth>root.clientWidth+1||root.scrollHeight>root.clientHeight+1)),controls:document.querySelectorAll("button,input,select,textarea").length},"*")},500);<\/script>';
+    const listener=event=>{if(event.source!==frame.contentWindow||event.data?.id!==id)return;status.textContent=(event.data.overflow?'FAIL: overflow. ':'PASS: frame fits. ')+(event.data.errors.length?'ERRORS: '+event.data.errors.join('; '):'No script errors. ')+event.data.controls+' controls: check behavior manually.';window.removeEventListener('message',listener)};
+    window.addEventListener('message',listener);
+    frame.srcdoc='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%}</style>'+before+code+after;
+    card.append(heading,status,frame);container.appendChild(card);
+  }
+};
+</script>
+</html>

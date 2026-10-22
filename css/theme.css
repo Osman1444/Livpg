@@ -1,0 +1,38 @@
+/* Livpg - Theme variables */
+/* Light theme (default). Every colour is a variable. */
+:root {
+  --bg: #f5f5f5;
+  --card: #fff;
+  --tx: #212121;
+  --mu: #616161;
+  --disabled: #aaa;
+  --scroll-thumb: #aaa;
+  --ac: #1976d2;
+  --on: #fff;
+  --tint: #e3f0fc;
+  --fld: #eee;
+  --cv: #eee;
+  --grid: #bdbdbd;
+  --warn: #fff3e0;
+  --red: #d32f2f;
+  --redt: #fdecea;
+  --sp: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* Dark theme: only overrides the variables. */
+html[data-theme="dark"] {
+  --bg: #121212;
+  --card: #1e1e1e;
+  --tx: #e8e8e8;
+  --mu: #a3a3a3;
+  --disabled: #606060;
+  --scroll-thumb: #707070;
+  --ac: #64b5f6;
+  --on: #0d2438;
+  --tint: #203447;
+  --fld: #2a2a2a;
+  --cv: #2a2a2a;
+  --grid: #bdbdbd;
+  --warn: #3b2c17;
+  --red: #ef5350;
+  --redt: #3f2524;
+}

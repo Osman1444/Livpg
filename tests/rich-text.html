@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Livpg rich text checks</title>
+<link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/components.css">
+<h1>Rich text browser checks</h1>
+<pre id="results">Running…</pre>
+<aside id="pn"></aside><div id="pg" style="position:relative;width:600px;height:400px"></div>
+<script src="../js/state.js"></script>
+<script src="../js/render.js"></script>
+<script>
+/** Test harness: isolate inline editing from the rest of the editor shell. */
+let started = false;
+function checkpoint() {}
+function queueCheckpoint() {}
+function stage() { finishTextEditing(); $('#pg').innerHTML = pageEls().map(renderElement).join(''); }
+function renderPanel() { selectionPanelContext=currentSelectionContext(); $('#pn').innerHTML = richTextPanel(); mountRichText(selectedEl()); }
+function isEditing(target) { return !!target.closest('[contenteditable="true"],input,textarea'); }
+function draw() { stage(); renderPanel(); }
+</script>
+<script src="../js/drawing.js"></script>
+<script src="../js/alignment.js"></script>
+<script src="../js/constraints.js"></script>
+<script src="../js/rich-text.js"></script>
+<script src="../js/selection.js"></script>
+<script src="../js/interactions.js"></script>
+<script>
+/** Exercises real browser selections, native decorations, canvas editing and saved output. */
+try {
+  const lines = [];
+  function check(value, label) {
+    if (!value) throw Error(label);
+    lines.push('PASS: ' + label);
+  }
+  const dirty = '<b onclick="alert(1)">bold</b><script>alert(1)<\/script><img src=x onerror="alert(1)"><span style="color:red;position:fixed" title="bad">red</span><iframe srcdoc="bad"></iframe><svg onload="alert(1)"></svg>';
+  const clean = cleanTextHTML(dirty);
+  check(!/onclick|script|onerror|iframe|svg|position|title=/.test(clean), 'Executable markup and non-formatting attributes removed');
+  check(clean.includes('<b>bold</b>') && clean.includes('color: red'), 'Allowed emphasis and color retained');
+  const decorated = cleanTextHTML('<span style="text-decoration-line:underline line-through">decorated</span>');
+  check(decorated.includes('underline') && decorated.includes('line-through'), 'Browser decoration longhands survive sanitization');
+  const legacy = renderElement({ t:'txt', v:'<b>literal</b>\nnext', id:1, x:0,y:0,w:200,h:100 });
+  check(legacy.includes('&lt;b>literal&lt;/b>'), 'Legacy plain text is escaped');
+  const standalone = new Function('return (' + renderElement.toString() + ')')();
+  check(standalone({t:'txt',rich:true,v:dirty,id:1,x:0,y:0,w:100,h:100}).includes('<b>bold</b>'), 'Export renderer works without editor helpers');
+  P = [{e:[{t:'txt',v:'Hello world',id:1,x:0,y:0,w:400,h:200}]}]; sel=1;
+  draw();
+  check(!$('#pn').querySelector('[contenteditable],textarea'), 'Panel contains no duplicate text input');
+  $('#pg .el').dispatchEvent(new MouseEvent('dblclick', {bubbles:true}));
+  const editor = $('#text-editor');
+  check(editor && $('#pg').contains(editor) && editor.isContentEditable, 'Double-click edits the actual page text');
+  const range = document.createRange();
+  range.setStart(editor.firstChild, 0); range.setEnd(editor.firstChild,5);
+  window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
+  rememberTextRange();
+  formatTextStyle('color', '#ff0000');
+  check(selectedEl().rich && /color:/.test(selectedEl().v), 'Formatting saves rich HTML');
+  check(editor.textContent === 'Hello world', 'Selection formatting preserves all text');
+  check(editor.querySelector('span').textContent === 'Hello', 'Formatting applies to selected range only');
+  textRange = null;
+  formatTextCommand('underline');
+  check(/underline/.test(selectedEl().v), 'Native underline persists in page state');
+  textRange = null;
+  formatTextCommand('strikeThrough');
+  check(/line-through/.test(selectedEl().v), 'Native strike-through persists in page state');
+  check($('#text-editor') === editor, 'Toolbar formatting preserves the live canvas node');
+  textRange = null;
+  toggleTextHighlight();
+  let highlightedRange = document.createRange();
+  highlightedRange.selectNodeContents(editor);
+  check(hasTextHighlight(highlightedRange, editor), 'Highlight toggle applies the chosen color');
+  check($('[data-highlight-toggle]').getAttribute('aria-pressed') === 'true', 'Highlight toggle shows its active state');
+  textRange = null;
+  toggleTextHighlight();
+  highlightedRange.selectNodeContents(editor);
+  check(!hasTextHighlight(highlightedRange, editor), 'Highlight toggle removes highlighting');
+  check(/underline/.test(selectedEl().v) && /line-through/.test(selectedEl().v), 'Removing highlight preserves text decorations');
+  // Regression: a partial highlight must toggle off without spreading to other text.
+  const partial = textCharacterRange(editor, 0, 5);
+  window.getSelection().removeAllRanges(); window.getSelection().addRange(partial);
+  rememberTextRange();
+  toggleTextHighlight();
+  check(window.getSelection().toString() === 'Hello', 'Highlight retains the exact partial selection');
+  check(hasTextHighlight(textCharacterRange(editor, 0, 5), editor), 'Only selected text receives highlight');
+  check(!hasTextHighlight(textCharacterRange(editor, 6, 11), editor), 'Unselected text remains unhighlighted');
+  toggleTextHighlight();
+  check(!hasTextHighlight(textCharacterRange(editor, 0, 5), editor), 'Second click removes the partial highlight');
+  check(!hasTextHighlight(textCharacterRange(editor, 6, 11), editor), 'Second click does not fill the rest of the box');
+  check([...editor.querySelectorAll('div,p,ul,ol,li')].every(node => !node.style.backgroundColor), 'Highlight does not paint block backgrounds');
+  formatTextCommand('justifyCenter');
+  check(editor.firstElementChild.style.textAlign === 'center', 'Alignment uses a full-width text block');
+  check($('[data-format="justifyCenter"]').getAttribute('aria-pressed') === 'true', 'Active alignment is reflected in the toolbar');
+  editor.firstElementChild.querySelectorAll('span').forEach(span => span.style.textAlign = 'left');
+  formatTextCommand('justifyRight');
+  check(editor.firstElementChild.style.textAlign === 'right', 'Alignment switches reliably');
+  check([...editor.firstElementChild.querySelectorAll('*')].every(node => !node.style.textAlign), 'Conflicting nested alignments are removed');
+  check(standalone(selectedEl()).includes('text-align: right'), 'Alignment persists in standalone output');
+  const exported = standalone(selectedEl());
+  check(/underline/.test(exported) && /line-through/.test(exported), 'Both decorations survive standalone export');
+  textRange = null;
+  formatTextStyle('font-size', '32');
+  check(editor.firstChild.style.fontSize === '32px', 'No selected range formats the whole box');
+  formatTextStyle('direction', 'rtl');
+  check(editor.firstChild.dir === 'rtl', 'Whole-box RTL direction applied');
+  check(cleanTextHTML(selectedEl().v).includes('dir="rtl"'), 'RTL survives sanitization');
+  editor.dispatchEvent(new Event('input', {bubbles:true}));
+  check($('#text-editor') === editor, 'Typing saves without replacing the editable node');
+  editor.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}));
+  check(!$('#pg [contenteditable]'), 'Escape exits inline editing');
+  check(/underline/.test($('#pg').innerHTML) && /line-through/.test($('#pg').innerHTML), 'Decorations survive finishing editing and a full redraw');
+  const before = JSON.stringify(P);
+  beginTextEditing(selectedEl());
+  finishTextEditing();
+  check(JSON.stringify(P) === before, 'Entering and leaving editing alone does not mutate the project');
+  $('#results').textContent = lines.join('\n');
+} catch (error) {
+  $('#results').textContent = 'FAIL: ' + error.stack;
+}
+</script>
+</html>
