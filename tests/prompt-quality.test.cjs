@@ -1,0 +1,46 @@
+/** Regression coverage for the physics-example failure and the reference experiment. */
+const fs=require('node:fs'), vm=require('node:vm'), assert=require('node:assert/strict');
+const context=vm.createContext({document:{querySelector:()=>null}});
+for(const file of ['state','ai-prompt']) vm.runInContext(fs.readFileSync(`js/${file}.js`,'utf8'),context);
+const run=source=>vm.runInContext(source,context);
+run('const AI={req:"A random physics experiment",style:"",ask:false,sizing:"auto"};P=[{e:[{id:1,t:"html",w:400,h:200}]}];sel=1;');
+let prompt=run('buildPrompt()');
+const hints=value=>Object.fromEntries([...value.matchAll(/<meta name="livpg:([a-z-]+)" content="([\d.]+)">/g)].map(m=>[m[1],+m[2]]));
+assert.equal(hints(prompt).width,560);
+assert.equal(hints(prompt).height,420);
+assert.ok(hints(prompt)['min-height']>=300,'Does not suggest unreadable 110px experiment frames');
+assert.ok(prompt.includes('NOT a size requirement'));
+assert.ok(prompt.includes('choose one experiment'));
+assert.ok(prompt.includes('SAME model'));
+run('AI.sizing="current"');prompt=run('buildPrompt()');
+assert.equal(hints(prompt).width,400);assert.equal(hints(prompt).height,200);
+run('AI.sizing="auto";W=540;H=960;M.grid={margin:20};');
+assert.equal(hints(run('buildPrompt()')).width,500,'Suggested size respects the page content area');
+const example=fs.readFileSync('examples/pendulum.html','utf8');
+const script=example.match(/<script>([\s\S]*?)<\/script>/)[1];
+new vm.Script(script);
+const model=script.match(/function pendulumState\(length, seconds\) \{([\s\S]*?)\n    \}/)[0];
+const state=vm.runInNewContext(`(${model})`);
+assert.ok(Math.abs(state(1,0).period-2.0060666807106475)<1e-10);
+assert.ok(Math.abs(state(4,0).period/state(1,0).period-2)<1e-10);
+assert.ok(Math.abs(state(1,state(1,0).period/4).angle)<1e-12);
+assert.ok(Math.abs(state(1,0).x-state(1,state(1,0).period).x)<1e-10);
+// Exercise the actual reference script, including pause/reset and scheduled frames.
+const nodes=new Map(), frames=new Map();let frameId=0;
+const get=key=>{if(!nodes.has(key))nodes.set(key,{value:key==='[data-slider]'?'100':'',attrs:{},handlers:{},setAttribute(k,v){this.attrs[k]=v;},addEventListener(k,fn){this.handlers[k]=fn;}});return nodes.get(key);};
+const root={isConnected:true,querySelector:get};
+const document={currentScript:{closest:()=>root},hidden:false,documentElement:{},addEventListener(){},removeEventListener(){}};
+const sandbox={document,matchMedia:()=>({matches:false,addEventListener(){},removeEventListener(){}}),MutationObserver:class{observe(){}disconnect(){}},requestAnimationFrame:fn=>{frames.set(++frameId,fn);return frameId;},cancelAnimationFrame:id=>frames.delete(id)};
+vm.runInNewContext(script,sandbox);
+assert.equal(get('[data-period]').textContent,'2.01 s');
+function step(time){const [id,fn]=frames.entries().next().value;frames.delete(id);fn(time);}
+step(0);step(1000);
+const actualX=+get('[data-bob]').attrs.cx;
+assert.ok(Math.abs(actualX-state(1,1).x)<1e-10,'Animation uses real elapsed seconds and the verified model');
+get('[data-play]').handlers.click();assert.equal(frames.size,0,'Pause stops animation frames');
+get('[data-slider]').value='180';get('[data-slider]').handlers.input();
+assert.equal(get('[data-period]').textContent,state(1.8,0).period.toFixed(2)+' s');
+assert.equal(frames.size,0,'Changing controls while paused does not restart animation');
+get('[data-reset]').handlers.click();assert.equal(get('[data-slider]').value,'100');
+assert.equal(get('[data-period]').textContent,'2.01 s');assert.equal(frames.size,1);
+console.log('Passed: usable prompt sizing, explicit fixed-size mode, scientific pendulum model, elapsed-time animation, pause and reset');
